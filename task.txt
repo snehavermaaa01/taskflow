@@ -1,3 +1,7 @@
 Connect mongodb 
 check models schemas.
-check pydantic implementation -- it is already inbuild -->study-->implementation
+check pydantic implementation -- it is already inbuild -->study-->implementation 
+
+-- .env KEYS FILE
+
+jwt token expiry

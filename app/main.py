@@ -1,61 +1,69 @@
-from fastapi import (
-    FastAPI,
-    HTTPException,
-    Depends
-)
-
-from fastapi.security import (
-    HTTPBearer,
-    HTTPAuthorizationCredentials
-)
-
+from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from bson import ObjectId
 
-from .database import (
+from app.database import (
     users_collection,
+    projects_collection,
     check_database
 )
 
-from .schemas import (
+from app.schemas import (
     SignupRequest,
     LoginRequest,
     UserResponse,
-    TokenResponse
+    TokenResponse,
+    ProjectCreate,
+    ProjectResponse
 )
 
-from .security import (
+from app.security import (
     hash_password,
     verify_password,
-    create_access_token,
-    decode_access_token
+    create_access_token
 )
+
+from app.deps import get_current_user
 
 
 app = FastAPI(
     title="TaskFlow API",
-    description="FastAPI + MongoDB Task Management API",
+    description="Task management API using FastAPI and MongoDB",
     version="1.0.0"
 )
 
+
+# -------------------------
+# CORS
+# -------------------------
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"]
+    allow_headers=["*"],
 )
 
 
+# -------------------------
+# ROOT
+# -------------------------
+
 @app.get("/")
-def home():
+def root():
     return {
         "message": "TaskFlow API is running"
     }
 
 
+# -------------------------
+# HEALTH
+# -------------------------
+
 @app.get("/health")
 def health():
+
     if check_database():
         return {
             "api": "ok",
@@ -68,14 +76,13 @@ def health():
     }
 
 
-# =========================
-# SIGNUP
-# =========================
+# =====================================================
+# AUTHENTICATION
+# =====================================================
 
 @app.post(
     "/auth/signup",
-    response_model=UserResponse,
-    status_code=201
+    response_model=UserResponse
 )
 def signup(data: SignupRequest):
 
@@ -89,34 +96,26 @@ def signup(data: SignupRequest):
             detail="Email already registered"
         )
 
-    existing_username = users_collection.find_one({
-        "username": data.username
-    })
-
-    if existing_username:
-        raise HTTPException(
-            status_code=400,
-            detail="Username already exists"
-        )
+    hashed_password = hash_password(data.password)
 
     user = {
         "email": data.email,
         "username": data.username,
-        "hashed_password": hash_password(data.password)
+        "password": hashed_password
     }
 
     result = users_collection.insert_one(user)
 
     return {
         "id": str(result.inserted_id),
-        "email": user["email"],
-        "username": user["username"]
+        "email": data.email,
+        "username": data.username
     }
 
 
-# =========================
+# -------------------------
 # LOGIN
-# =========================
+# -------------------------
 
 @app.post(
     "/auth/login",
@@ -136,7 +135,7 @@ def login(data: LoginRequest):
 
     if not verify_password(
         data.password,
-        user["hashed_password"]
+        user["password"]
     ):
         raise HTTPException(
             status_code=401,
@@ -153,61 +152,9 @@ def login(data: LoginRequest):
     }
 
 
-# =========================
-# AUTHENTICATION
-# =========================
-
-security = HTTPBearer()
-
-
-def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(
-        security
-    )
-):
-    token = credentials.credentials
-
-    try:
-        payload = decode_access_token(token)
-
-        user_id = payload.get("user_id")
-
-        if not user_id:
-            raise HTTPException(
-                status_code=401,
-                detail="Invalid token"
-            )
-
-    except Exception:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid token"
-        )
-
-    from bson import ObjectId
-
-    try:
-        user = users_collection.find_one({
-            "_id": ObjectId(user_id)
-        })
-    except Exception:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid user ID"
-        )
-
-    if not user:
-        raise HTTPException(
-            status_code=401,
-            detail="User not found"
-        )
-
-    return user
-
-
-# =========================
+# -------------------------
 # CURRENT USER
-# =========================
+# -------------------------
 
 @app.get(
     "/users/me",
@@ -221,4 +168,189 @@ def get_me(
         "id": str(current_user["_id"]),
         "email": current_user["email"],
         "username": current_user["username"]
+    }
+
+
+# =====================================================
+# PROJECTS
+# =====================================================
+
+# CREATE PROJECT
+# =====================================================
+
+@app.post(
+    "/projects",
+    response_model=ProjectResponse
+)
+def create_project(
+    data: ProjectCreate,
+    current_user=Depends(get_current_user)
+):
+
+    project = {
+        "name": data.name,
+        "description": data.description,
+        "owner_id": str(current_user["_id"])
+    }
+
+    result = projects_collection.insert_one(project)
+
+    return {
+        "id": str(result.inserted_id),
+        "name": project["name"],
+        "description": project["description"],
+        "owner_id": project["owner_id"]
+    }
+
+
+# =====================================================
+# GET ALL PROJECTS
+# =====================================================
+
+@app.get(
+    "/projects",
+    response_model=list[ProjectResponse]
+)
+def get_projects(
+    current_user=Depends(get_current_user)
+):
+
+    owner_id = str(current_user["_id"])
+
+    projects = projects_collection.find({
+        "owner_id": owner_id
+    })
+
+    result = []
+
+    for project in projects:
+
+        result.append({
+            "id": str(project["_id"]),
+            "name": project["name"],
+            "description": project.get("description"),
+            "owner_id": project["owner_id"]
+        })
+
+    return result
+
+
+# =====================================================
+# GET SINGLE PROJECT
+# =====================================================
+
+@app.get(
+    "/projects/{project_id}",
+    response_model=ProjectResponse
+)
+def get_project(
+    project_id: str,
+    current_user=Depends(get_current_user)
+):
+
+    try:
+        project = projects_collection.find_one({
+            "_id": ObjectId(project_id),
+            "owner_id": str(current_user["_id"])
+        })
+    except Exception:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid project ID"
+        )
+
+    if not project:
+        raise HTTPException(
+            status_code=404,
+            detail="Project not found"
+        )
+
+    return {
+        "id": str(project["_id"]),
+        "name": project["name"],
+        "description": project.get("description"),
+        "owner_id": project["owner_id"]
+    }
+
+
+# =====================================================
+# UPDATE PROJECT
+# =====================================================
+
+@app.put(
+    "/projects/{project_id}",
+    response_model=ProjectResponse
+)
+def update_project(
+    project_id: str,
+    data: ProjectCreate,
+    current_user=Depends(get_current_user)
+):
+
+    try:
+        result = projects_collection.update_one(
+            {
+                "_id": ObjectId(project_id),
+                "owner_id": str(current_user["_id"])
+            },
+            {
+                "$set": {
+                    "name": data.name,
+                    "description": data.description
+                }
+            }
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid project ID"
+        )
+
+    if result.matched_count == 0:
+        raise HTTPException(
+            status_code=404,
+            detail="Project not found"
+        )
+
+    project = projects_collection.find_one({
+        "_id": ObjectId(project_id)
+    })
+
+    return {
+        "id": str(project["_id"]),
+        "name": project["name"],
+        "description": project.get("description"),
+        "owner_id": project["owner_id"]
+    }
+
+
+# =====================================================
+# DELETE PROJECT
+# =====================================================
+
+@app.delete("/projects/{project_id}")
+def delete_project(
+    project_id: str,
+    current_user=Depends(get_current_user)
+):
+
+    try:
+        result = projects_collection.delete_one({
+            "_id": ObjectId(project_id),
+            "owner_id": str(current_user["_id"])
+        })
+    except Exception:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid project ID"
+        )
+
+    if result.deleted_count == 0:
+        raise HTTPException(
+            status_code=404,
+            detail="Project not found"
+        )
+
+    return {
+        "message": "Project deleted successfully"
     }
