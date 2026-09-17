@@ -46,3 +46,17 @@ def create_task_document(
         "user_id": user_id,
         "created_at": datetime.utcnow()
     }
+    # app/models.py
+
+from pydantic import BaseModel, EmailStr
+
+
+class SignupRequest(BaseModel):
+    name: str
+    email: EmailStr
+    password: str
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str

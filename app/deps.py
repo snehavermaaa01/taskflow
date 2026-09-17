@@ -1,48 +1,62 @@
+# app/deps.py
+
 from fastapi import Depends, HTTPException
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+
+from jose import jwt, JWTError
 from bson import ObjectId
 
 from app.database import users_collection
-from app.security import decode_access_token
+from app.auth import SECRET_KEY, ALGORITHM
 
 
-oauth2_scheme = OAuth2PasswordBearer(
-    tokenUrl="/auth/login"
-)
+security = HTTPBearer()
 
 
-def get_current_user(token: str = Depends(oauth2_scheme)):
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+):
 
-    payload = decode_access_token(token)
+    token = credentials.credentials
 
-    if not payload:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid or expired token"
+    try:
+        payload = jwt.decode(
+            token,
+            SECRET_KEY,
+            algorithms=[ALGORITHM],
         )
 
-    user_id = payload.get("user_id")
+        user_id = payload.get("sub")
 
-    if not user_id:
+        if not user_id:
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid token.",
+            )
+
+    except JWTError:
         raise HTTPException(
             status_code=401,
-            detail="Invalid token"
+            detail="Invalid or expired token.",
         )
 
     try:
-        user = users_collection.find_one({
-            "_id": ObjectId(user_id)
-        })
+        object_id = ObjectId(user_id)
+
     except Exception:
         raise HTTPException(
             status_code=401,
-            detail="Invalid user ID"
+            detail="Invalid user ID.",
         )
+
+    user = await users_collection.find_one(
+        {"_id": object_id}
+    )
 
     if not user:
         raise HTTPException(
             status_code=401,
-            detail="User not found"
+            detail="User not found.",
         )
 
     return user

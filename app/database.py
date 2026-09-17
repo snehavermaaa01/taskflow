@@ -1,19 +1,13 @@
-from pymongo import MongoClient
-from app.config import MONGO_URL
+from motor.motor_asyncio import AsyncIOMotorClient
 
-client = MongoClient(MONGO_URL)
+# MongoDB connection URL
+MONGO_URL = "mongodb://localhost:27017"
 
+# Create async MongoDB client
+client = AsyncIOMotorClient(MONGO_URL)
+
+# Select database
 database = client["taskflow"]
 
+# Select users collection
 users_collection = database["users"]
-projects_collection = database["projects"]
-tasks_collection = database["tasks"]
-media_collection = database["media"]
-
-
-def check_database():
-    try:
-        client.admin.command("ping")
-        return True
-    except Exception:
-        return False
