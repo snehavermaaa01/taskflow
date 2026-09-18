@@ -5,3 +5,13 @@ check pydantic implementation -- it is already inbuild -->study-->implementation
 -- .env KEYS FILE
 
 jwt token expiry
+
+role based authentication
+__shop management__(--research---)
+
+resource--(inventory--> item(id) (cp, sp) )
+superadmin
+admin
+manager
+
+user-- customer
